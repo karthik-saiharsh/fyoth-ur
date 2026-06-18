@@ -6,10 +6,17 @@ import "core:fmt"
 import "core:os"
 import "core:sys/posix"
 
+/***** GLOBAL VARIABLES *****/
 original_properties: posix.termios
+
+/***** TERMINAL *****/
 
 // An error reporting function
 die :: proc(s: cstring) {
+	// Clear the terminal and reposition the cursor
+	clear_screen()
+	reposition_cursor()
+
 	restoreTerminal()
 	posix.perror(s)
 	os.exit(1)
@@ -79,28 +86,55 @@ editorReadKey :: proc() -> u8 {
 
 }
 
+/***** INPUT HANDLING *****/
+
 editorProcessKeyPress :: proc() {
 	c: u8 = editorReadKey()
 
 	fmt.printf("%d %c\r\n", c, rune(c))
 
 	switch c {
-		case ctrl_key('q'): 
+	case ctrl_key('q'):
+		// Clear the terminal and reposition the cursor
+		clear_screen()
+		reposition_cursor()
 		restoreTerminal()
 		os.exit(0)
 	}
 }
+
+/***** OUTPUT HANDLING *****/
+editorRefreshScreen :: proc() {
+
+	clear_screen()
+	reposition_cursor()
+
+	editorDrawRows()
+	reposition_cursor()
+
+}
+
+/**
+* Draw a "~"
+*/
+editorDrawRows :: proc() {
+	for y in 0 ..< 24 {
+		posix.write(posix.STDOUT_FILENO, raw_data(string("~\r\n")), 3)
+	}
+}
+
+/***** INIT *****/
 
 main :: proc() {
 
 	enableRawMode()
 
 	for {
+		editorRefreshScreen()
 		editorProcessKeyPress()
 	}
 
 }
-
 
 
 /************* HELPER FUNCTIONS *************/
@@ -111,5 +145,22 @@ main :: proc() {
 */
 ctrl_key :: proc(key: u8) -> u8 {
 	return key & 0x01f
+}
+
+clear_screen :: proc() {
+	// We are writing  4 bytes. \x1b is the first byte, and [2J the other 3.
+	// Most terminal escape characters start with the escape character \x1b and a [
+	// Now escape characters take in arguments, kinda like a function.
+	// So the function/command we want to use is `J` which is for clearning the screen and the argument
+	// we pass to the command `J` is `2`
+	// 2 here tells J to clear the whole screen.
+	// There's also 0 and 1. 0 means clear the screen from the cursor to the end.
+	// And 1 means clear screen upto the cursor.
+	posix.write(posix.STDOUT_FILENO, raw_data(string("\x1b[2J")), 4)
+}
+
+reposition_cursor :: proc() {
+	posix.write(posix.STDOUT_FILENO, raw_data(string("\x1b[H")), 3) // Reposition the cursor to start the top left
+
 }
 /************* HELPER FUNCTIONS *************/
