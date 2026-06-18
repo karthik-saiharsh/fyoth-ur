@@ -10,6 +10,7 @@ original_properties: posix.termios
 
 // An error reporting function
 die :: proc(s: cstring) {
+	restoreTerminal()
 	posix.perror(s)
 	os.exit(1)
 }
@@ -26,7 +27,7 @@ enableRawMode :: proc() {
 	raw: posix.termios // tremios struct	
 
 	// get current parameters
-	if ok := posix.tcgetattr(posix.STDIN_FILENO, &raw); ok != posix.result(0) do die("tcgetattr failed")
+	raw = original_properties
 
 	// remove ECHO from set of input flags (no input feedback)
 	raw.c_lflag -= {.ECHO}
@@ -61,22 +62,54 @@ restoreTerminal :: proc "cdecl" () {
 	if ok := posix.tcsetattr(posix.STDIN_FILENO, .TCSAFLUSH, &original_properties); ok != posix.result(0) do die("tcsetattr failed")
 }
 
+
+editorReadKey :: proc() -> u8 {
+	nread: libc.ssize_t
+	c: u8
+
+	for {
+		nread = posix.read(posix.STDIN_FILENO, &c, 1)
+
+		if nread == 1 do break
+
+		if nread == -1 && posix.errno() != .EAGAIN do die("Read Failed")
+	}
+
+	return c
+
+}
+
+editorProcessKeyPress :: proc() {
+	c: u8 = editorReadKey()
+
+	fmt.printf("%d %c\r\n", c, rune(c))
+
+	switch c {
+		case ctrl_key('q'): 
+		restoreTerminal()
+		os.exit(0)
+	}
+}
+
 main :: proc() {
 
 	enableRawMode()
 
-	// read directly from stdin as bytes into buffer c
 	for {
-		c: u8 // read the current character
-
-		if ok := posix.read(posix.STDIN_FILENO, &c, 1); ok == -1 do die("read failed")
-
-		if c == 'q' do break
-
-		if libc.iscntrl(i32(c)) != 0 {
-			fmt.printf("%d \r\n", c)
-		} else {
-			fmt.printf("%d %c\r\n", c, rune(c))
-		}
+		editorProcessKeyPress()
 	}
+
 }
+
+
+
+/************* HELPER FUNCTIONS *************/
+/**
+* When you press ctrl + a key, the ctrl just masks bit 5 and 6 of the 8 bits (read from right to left, 0 indexed)
+* and sends that input to stdin. We will mimic that by AND-ing our key with 0x01f. We can compare the returned value
+* from this function with the stdin char read to see if ctrl+key is pressed!
+*/
+ctrl_key :: proc(key: u8) -> u8 {
+	return key & 0x01f
+}
+/************* HELPER FUNCTIONS *************/
